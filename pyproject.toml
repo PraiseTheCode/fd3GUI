@@ -1,0 +1,25 @@
+[tool.poetry]
+name = "fd3-gui"
+version = "0.1.0"
+description = ""
+authors = ["PraiseTheCode <deomlette@gmail.com>"]
+readme = "README.md"
+packages = [{include = "fd3_gui"}]
+
+
+[tool.poetry.dependencies]
+python = "3.8.8"
+numpy = "1.20.1"
+scipy = "1.10.0"
+pandas = "1.2.4"
+matplotlib = "3.3.4"
+astropy = "5.2.1"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+
+[tool.poetry.scripts]
+fd3 = 'fd3_gui.fd3bin_gui:main'
