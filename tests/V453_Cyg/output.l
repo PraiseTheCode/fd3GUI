@@ -69,8 +69,8 @@
 
   SECTION 6: OPTIMISATION DETAILS
 
-  number of independent optimisation runs = 100
-  number of allowed iterations per run = 1000
+  number of independent optimisation runs = 50
+  number of allowed iterations per run = 800
   stop when simplex shrinked by factor = 1e-05
 
   SECTION 7: OPTIMISATION
@@ -134,7 +134,7 @@
                    rv semiamp of A in A--B = 174.149809 km/s
                    rv semiamp of B in A--B = 217.773225 km/s
 
-  completed 100 optimisation runs
+  completed 50 optimisation runs
 
   EXITING REGULARLY
 

@@ -1,22 +1,24 @@
-import tkinter as tk
-from tkinter import filedialog
+import numpy as np
+from scipy import interpolate
+import pandas as pd
+from astropy.io import fits
+
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import NavigationToolbar2Tk
-from tkinter import filedialog
-import subprocess
 
-import pandas as pd
-import numpy as np
-from scipy import interpolate
+import tkinter as tk
+from tkinter import filedialog
+
 import os
 import fnmatch
-from astropy.io import fits
-
 import shutil
+import subprocess
 from datetime import datetime
 import re
 import time
+import atexit
+import signal
 
 class Application(tk.Tk):
     def __init__(self):
@@ -24,6 +26,8 @@ class Application(tk.Tk):
         tk.Tk.__init__(self)
         self.state('zoomed')
         self.title("PYfd3")
+        
+        self.temp_files = []
 
 
         left_frame = tk.Frame(self, width=self.winfo_screenwidth()//4)
@@ -87,21 +91,26 @@ class Application(tk.Tk):
         
         self.path_fd3 = './execfd3/fd3'
         
+    def cleanup_temp_files(self):
+        for file_path in self.temp_files:
+            try:
+                os.remove(file_path)
+                print(f"Deleted file: {file_path}")
+            except OSError as e:
+                print(f"Error deleting file: {file_path}\n{e}")
+        self.temp_files = []
+                
 
     def change_path(self):
-        directory_path = filedialog.askdirectory(initialdir='./tests')
+        directory_path = filedialog.askdirectory(initialdir=self.path)
         self.path = directory_path + "/"
         shutil.copy(self.path_fd3, self.path + "fd3")
-        print(self.path + "fd3")
 
     def form_input_file(self):
         
         self.text_area.delete('1.0', tk.END)
         
         self.extension = self.text_ext.get()
-        
-        print(self.path)
-        print(self.extension)
         
         files = fnmatch.filter(os.listdir(self.path), self.extension)
 
@@ -124,13 +133,11 @@ class Application(tk.Tk):
         
         spectra = [pd.read_csv(self.path+f, names=['wavelength', 'flux'], delim_whitespace=True) for f in files]
         
-        
-        
         log_wavelength_min = np.max([np.log(df['wavelength'].min()) for df in spectra])
         log_wavelength_max = np.min([np.log(df['wavelength'].max()) for df in spectra])
         
         step = 0.020 # in A
-        NN = int((np.e**log_wavelength_max-np.e**(log_wavelength_min))/step) # Number of pixels for resampling
+        NN = int((np.e**log_wavelength_max-np.e**(log_wavelength_min))/step) 
         
         log_wavelength_step = (log_wavelength_max - log_wavelength_min) / NN
         
@@ -146,7 +153,6 @@ class Application(tk.Tk):
             
             resampled_spectra[f'flux_{i}'] = f(common_log_wavelength)
             
-            
         resampled_spectra = resampled_spectra.applymap(lambda x: f"{x:1.10f}")
         
         #np.savetxt(path+'resampled_spectra.dat', resampled_spectra.values, header=f'{resampled_spectra.shape[1]} X {resampled_spectra.shape[0]}', comments='# ')
@@ -155,9 +161,7 @@ class Application(tk.Tk):
             f.write(f'# {resampled_spectra.shape[1]} X {resampled_spectra.shape[0]}\n')
         resampled_spectra.to_csv(self.path+'resampled_spectra.dat', sep=' ', index=False, header=False, mode='a')
         
-        
         bjd_df.to_csv(self.path+'BJD_values.csv', index=False, sep = "\t")
-        
         
         
         formatted_bjd_df = bjd_df.copy()
@@ -200,82 +204,92 @@ class Application(tk.Tk):
 
     def run_code(self):
         
-        executable_path = os.path.join(self.path, 'fd3')
-        #command = './fd3 < input.in > output.l'
-        command = f'{executable_path} < input.in > output.l'
-        #print(command)
-        #self.result = subprocess.run(command, shell=True, cwd=self.path)
-        self.result = subprocess.Popen(command,shell=True,cwd=self.path, stdin=None,stdout=None,stderr=None,close_fds=True)
+        try:
+        
+            executable_path = os.path.join(self.path, 'fd3')
+            command = f'{executable_path} < input.in > output.l'
+            self.result = subprocess.Popen(command,shell=True,cwd=self.path, stdin=None,stdout=None,stderr=None,close_fds=True)
+            self.cleanup_temp_files()
+            
+        except Exception as e:
+            
+            print(f"An error occurred: {e}")
+            
+            self.cleanup_temp_files()
+            
 
     def run_jackknife(self):
-        aa = np.loadtxt(self.path+'resampled_spectra.dat', skiprows=1)
-        num_rows, num_cols = aa.shape
-        nc = num_cols-1
         
-        header, data, footer = self.parse_file(self.path+'input.in')
-        
-        wl1 = float(header['value1'])
-        wl2 = float(header['value2'])
-        
-        aa = np.loadtxt(self.path+'resampled_spectra.dat', skiprows = 1)
-        df = pd.DataFrame(aa)
-        
-        df = df[df[0] <= wl2+0.1]
-        df = df[df[0] >= wl1-0.1]
-        
-        with open(self.path+'resampled_spectra.buff', 'w') as f:
-            f.write(f'# {df.shape[1]} X {df.shape[0]}\n')
-        df.to_csv(self.path+'resampled_spectra.buff', sep=' ', index=False, header=False, mode='a')
-        
-        
-        
-        for ic in range(1,nc+1,1):
-            self.form_jack_input(ic,nc)
-        for ic in range(1,nc+1,1):
-            self.run_jack_node(ic, nc)
-        time.sleep(60)
-        all_pars = []
-        df1 = self.parse_output(self.path+'output.l')
-        for ic in range(1,nc+1,1):
-            df = self.parse_output(self.path+'output_'+str(ic)+'.l')
-            print("???")
-            print(ic)
-            print(df)
-            pp = np.array(df['value'].astype(float))
-            all_pars.append([])
-            for jp in pp:
-                all_pars[ic-1].append(jp)
+        try:
             
-        all_pars = np.array(all_pars)
-        print(all_pars)
-        dfpp = pd.DataFrame(all_pars)
-        dfpp.to_csv(self.path+'jackknife.out', sep=' ', index=False, mode='w')
-        
-        for i in range(len(all_pars[:,0])):
-            if all_pars[i][-1] < all_pars[i][-2]:
-                bb = all_pars[i][-1]
-                all_pars[i][-1] = all_pars[i][-2]
-                all_pars[i][-2] = bb
+            aa = np.loadtxt(self.path+'resampled_spectra.dat', skiprows=1)
+            num_rows, num_cols = aa.shape
+            nc = num_cols-1
+            
+            header, data, footer = self.parse_file(self.path+'input.in')
+            
+            wl1 = float(header['value1'])
+            wl2 = float(header['value2'])
+            
+            aa = np.loadtxt(self.path+'resampled_spectra.dat', skiprows = 1)
+            df = pd.DataFrame(aa)
+            
+            df = df[df[0] <= wl2+0.1]
+            df = df[df[0] >= wl1-0.1]
+            
+            with open(self.path+'resampled_spectra.buff', 'w') as f:
+                f.write(f'# {df.shape[1]} X {df.shape[0]}\n')
+            df.to_csv(self.path+'resampled_spectra.buff', sep=' ', index=False, header=False, mode='a')
+            
+            self.temp_files.append(self.path+'resampled_spectra.buff')
+            
+            
+            for ic in range(1,nc+1,1):
+                self.form_jack_input(ic,nc)
+            for ic in range(1,nc+1,1):
+                self.run_jack_node(ic, nc)
+            time.sleep(60)
+            all_pars = []
+            df1 = self.parse_output(self.path+'output.l')
+            for ic in range(1,nc+1,1):
+                df = self.parse_output(self.path+'output_'+str(ic)+'.l')
+                pp = np.array(df['value'].astype(float))
+                all_pars.append([])
+                for jp in pp:
+                    all_pars[ic-1].append(jp)
+                
+            all_pars = np.array(all_pars)
+            dfpp = pd.DataFrame(all_pars)
+            dfpp.to_csv(self.path+'jackknife.out', sep=' ', index=False, mode='w')
+            
+            for i in range(len(all_pars[:,0])):
+                if all_pars[i][-1] < all_pars[i][-2]:
+                    bb = all_pars[i][-1]
+                    all_pars[i][-1] = all_pars[i][-2]
+                    all_pars[i][-2] = bb
+                    if len(all_pars[0]) == 5:
+                        all_pars[i][-3] = (all_pars[i][-3] - 180) % 360
+            
+                
+            dfpp = pd.DataFrame(all_pars)
+            dfpp.to_csv(self.path+'jackknife_swap.out', sep=' ', index=False, mode='w')
+            
+            errs = []
+            for i in range(len(all_pars[0])):
+                er = self.jackerr(all_pars[:,i])
                 if len(all_pars[0]) == 5:
-                    all_pars[i][-3] = (all_pars[i][-3] - 180) % 360
-        
+                    if i == 2:
+                        er = self.jackerr_angle(all_pars[:,i])
+                errs.append(er)
+            df1['errors'] = np.array(errs)
+            df1.to_csv(self.path+'errors.dat', sep=' ', index=False, mode='w')
+            print(df1['errors'])
             
-        print(all_pars)
-        dfpp = pd.DataFrame(all_pars)
-        dfpp.to_csv(self.path+'jackknife_swap.out', sep=' ', index=False, mode='w')
-        
-        errs = []
-        for i in range(len(all_pars[0])):
-            er = self.jackerr(all_pars[:,i])
-            if len(all_pars[0]) == 5:
-                if i == 2:
-                    er = self.jackerr_angle(all_pars[:,i])
-            errs.append(er)
-        print(errs)
-        df1['errors'] = np.array(errs)
-        print(df1)
-        df1.to_csv(self.path+'errors.dat', sep=' ', index=False, mode='w')
-            
+            self.cleanup_temp_files()
+                
+        except Exception as e:
+            print(f"An error occurred: {e}")
+            self.cleanup_temp_files()
         
     def save_changes(self):
         now = datetime.now()
@@ -284,6 +298,7 @@ class Application(tk.Tk):
         file_content = self.text_area.get('1.0', 'end')
         with open(self.path+'input.in', 'w') as file:
             file.write(file_content)
+        
 
     def clear_plot(self):
         self.axes.clear()
@@ -402,9 +417,6 @@ class Application(tk.Tk):
                     out.write(str(aa[i][0]) + "\t" + str(aa[i][j]) + "\n")
         
 
-    def normalise(self):
-        print("Normalise")
-        
     def form_jack_input(self, ic, nc):
     
         def save_file(file_name, header, data, footer):
@@ -444,11 +456,30 @@ class Application(tk.Tk):
         
         save_file(self.path+'input_'+str(ic)+'.in', header, data, footer)    
             
+        self.temp_files.append(self.path+'resampled_spectra_'+str(ic)+'.dat')
         
+        self.temp_files.append(self.path+'temp_'+str(ic)+'.obs')
+        self.temp_files.append(self.path+'temp_'+str(ic)+'.obs.obs')
+        self.temp_files.append(self.path+'temp_'+str(ic)+'.obs.res')
+        self.temp_files.append(self.path+'temp_'+str(ic)+'.obs.rvs')
+        self.temp_files.append(self.path+'temp_'+str(ic)+'.obs.log')
+        self.temp_files.append(self.path+'temp_'+str(ic)+'.obs.mod')
+        
+        self.temp_files.append(self.path+'input_'+str(ic)+'.in')
+        
+        self.temp_files.append(self.path+footer['final_values'][-3])
+        self.temp_files.append(self.path+footer['final_values'][-2])
+        self.temp_files.append(self.path+footer['final_values'][-1])
 
     def run_jack_node(self, ic, nc):
         shutil.copy(self.path_fd3, self.path + "fd3_"+str(ic))
+        
+        self.temp_files.append(self.path + "fd3_"+str(ic))
+        
         command = './fd3_' +str(ic)+ ' < input_' +str(ic)+ '.in' + ' > output_' +str(ic)+ '.l'
+        
+        self.temp_files.append(self.path + 'output_' +str(ic)+ '.l')
+        
         if ic%9 == 0 or ic == nc:
             self.result = subprocess.run(command, shell=True, cwd=self.path)
         else:    
@@ -456,7 +487,6 @@ class Application(tk.Tk):
             
             
     def jackerr(self,array_par):
-        print(array_par)
         nc = len(array_par)
         ss = sum(array_par)/float(nc)
         se = 0.0
@@ -464,7 +494,6 @@ class Application(tk.Tk):
             se += (array_par[i]-ss)**2
         se *= float(nc-1)/float(nc)
         se = np.sqrt(se)
-        print(se)
         return se
     
     def normalize_angle(self,angle):
@@ -487,7 +516,6 @@ class Application(tk.Tk):
             se += diff ** 2
         se *= float(nc - 1) / float(nc)
         se = np.sqrt(se)
-        print(se)
         return se
     
     def parse_output(self, fpath):
@@ -511,28 +539,53 @@ class Application(tk.Tk):
                 if "completed" in line:
                     break
                 if start_reading:
-                    print("!!!", line)
                     parameter, value = line.strip().split("=")
-                    print("!!!", parameter, value)
                     try:
                         value = float(re.findall("[+-]?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?", value)[0])
-                        print(value)
                         if "periast long" in line:
                             value = value % 360
                         data.append({"parameter name": parameter.strip(), "value": value})
-                        print(value)
                     except:
                         print(line)
     
         df = pd.DataFrame(data)
-        print(df)
         return df
         
     
     
+
+
+def exit_handler():
+    app.cleanup_temp_files()
+
 def main():
     app = Application()
+
+    atexit.register(exit_handler)
+
+
+    def signal_handler(signal, frame):
+        print("Received termination signal. Cleaning up...")
+        app.cleanup_temp_files()
+        app.destroy()
+
+
+    signal.signal(signal.SIGINT, signal_handler)
+
     app.mainloop()
 
 if __name__ == "__main__":
-    main()
+    app = Application()
+
+    atexit.register(exit_handler)
+    
+    
+    def signal_handler(signal, frame):
+        print("Received termination signal. Cleaning up...")
+        app.cleanup_temp_files()
+        app.destroy()
+    
+
+    signal.signal(signal.SIGINT, signal_handler)
+
+    app.mainloop()
