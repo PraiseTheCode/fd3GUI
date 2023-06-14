@@ -17,8 +17,6 @@ import subprocess
 from datetime import datetime
 import re
 import time
-import atexit
-import signal
 
 class Application(tk.Tk):
     def __init__(self):
@@ -47,6 +45,7 @@ class Application(tk.Tk):
         self.form_input_file_button = tk.Button(left_frame, text='Form Input File', command=self.form_input_file)
         self.run_code_button = tk.Button(left_frame, text='Run Code', command=self.run_code)
         self.run_jackknife_button = tk.Button(left_frame, text='Run Jackknife', command=self.run_jackknife)
+        self.recalc_error_button = tk.Button(left_frame, text='Recalculate error', command=self.recalc_error)
 
         self.text_area = tk.Text(mid_frame)
         self.save_button = tk.Button(mid_frame, text='Save Changes', command=self.save_changes)
@@ -69,6 +68,7 @@ class Application(tk.Tk):
         self.form_input_file_button.pack(fill='x')
         self.run_code_button.pack(fill='x')
         self.run_jackknife_button.pack(fill='x')
+        self.recalc_error_button.pack(fill='x')
 
 
         self.text_area.pack(fill='both', expand=True)
@@ -182,7 +182,7 @@ class Application(tk.Tk):
         
         
         with open(self.path+'input.in', 'w') as f:
-            f.write("resampled_spectra.dat     temp.obs  1 1 0" + "\n")
+            f.write("resampled_spectra.dat   8.40 8.43  temp.obs  1 1 0" + "\n")
             f.write("\n")
             
             f.write('\n'.join(formatted_bjd_df.apply(' '.join, axis=1)), )
@@ -209,13 +209,13 @@ class Application(tk.Tk):
             executable_path = os.path.join(self.path, 'fd3')
             command = f'{executable_path} < input.in > output.l'
             self.result = subprocess.Popen(command,shell=True,cwd=self.path, stdin=None,stdout=None,stderr=None,close_fds=True)
-            self.cleanup_temp_files()
+            #self.cleanup_temp_files()
             
         except Exception as e:
             
             print(f"An error occurred: {e}")
             
-            self.cleanup_temp_files()
+            #self.cleanup_temp_files()
             
 
     def run_jackknife(self):
@@ -249,8 +249,17 @@ class Application(tk.Tk):
             for ic in range(1,nc+1,1):
                 self.run_jack_node(ic, nc)
             time.sleep(60)
+            
             all_pars = []
+            
+            
             df1 = self.parse_output(self.path+'output.l')
+            df1["value"] = pd.to_numeric(df1["value"])
+            if df1.iloc[-1, 1] < df1.iloc[-2, 1]:
+                df1.iloc[-1, 1], df1.iloc[-2, 1] = df1.iloc[-2, 1], df1.iloc[-1, 1]
+                if df1.shape[0] == 5:
+                    df1.iloc[-3, 1] = (df1.iloc[-3, 1] - 180) % 360
+            
             for ic in range(1,nc+1,1):
                 df = self.parse_output(self.path+'output_'+str(ic)+'.l')
                 pp = np.array(df['value'].astype(float))
@@ -290,6 +299,28 @@ class Application(tk.Tk):
         except Exception as e:
             print(f"An error occurred: {e}")
             self.cleanup_temp_files()
+            
+    def recalc_error(self):
+        df1 = self.parse_output(self.path+'output.l')
+        df1["value"] = pd.to_numeric(df1["value"])
+        if df1.iloc[-1, 1] < df1.iloc[-2, 1]:
+            df1.iloc[-1, 1], df1.iloc[-2, 1] = df1.iloc[-2, 1], df1.iloc[-1, 1]
+            if df1.shape[0] == 5:
+                df1.iloc[-3, 1] = (df1.iloc[-3, 1] - 180) % 360
+        
+        all_pars = np.loadtxt(self.path+"jackknife_swap.out", skiprows=1)
+        
+        errs = []
+        for i in range(len(all_pars[0])):
+            er = self.jackerr(all_pars[:,i])
+            if len(all_pars[0]) == 5:
+                if i == 2:
+                    er = self.jackerr_angle(all_pars[:,i])
+            errs.append(er)
+        df1['errors'] = np.array(errs)
+        df1.to_csv(self.path+'errors_recalc.dat', sep=' ', index=False, mode='w')
+        
+        print(df1)
         
     def save_changes(self):
         now = datetime.now()
@@ -553,39 +584,9 @@ class Application(tk.Tk):
         
     
     
-
-
-def exit_handler():
-    app.cleanup_temp_files()
-
 def main():
     app = Application()
-
-    atexit.register(exit_handler)
-
-
-    def signal_handler(signal, frame):
-        print("Received termination signal. Cleaning up...")
-        app.cleanup_temp_files()
-        app.destroy()
-
-
-    signal.signal(signal.SIGINT, signal_handler)
-
     app.mainloop()
 
 if __name__ == "__main__":
-    app = Application()
-
-    atexit.register(exit_handler)
-    
-    
-    def signal_handler(signal, frame):
-        print("Received termination signal. Cleaning up...")
-        app.cleanup_temp_files()
-        app.destroy()
-    
-
-    signal.signal(signal.SIGINT, signal_handler)
-
-    app.mainloop()
+    main()
