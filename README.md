@@ -49,7 +49,9 @@ Download all files from github page, and navigate to the project directory where
 
 # Step 5: Verify version of executable execfd3/fd3
 
-Since this code is just a wrapper and runs an external executable, this executable needs to be compiled for your system. By default there is macOS executable included, but there is also Linux executable available. Go to directory execfd3, copy the one for your system (either fd3_macOS or fd3_Linux) and rename it to "fd3" 
+Since this code is just a wrapper and runs an external executable, this executable needs to be compiled for your system. By default there is macOS executable included, but there is also Linux executable available. Go to directory execfd3, copy the one for your system (either fd3_macOS or fd3_Linux) and rename it to "fd3".
+
+If the executable doesn't work, you may need to recompile it from c source code. Contact nadya.serebriakova@kuleuven.be 
 
 # Step 6: Running the Application
 
