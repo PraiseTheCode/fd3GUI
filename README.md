@@ -55,5 +55,4 @@ If the executable doesn't work, you may need to recompile it from c source code.
 
 # Step 6: Running the Application
 
-    cd fd3_gui
-    poetry run python fd3bin_gui.py
+    poetry run python fd3_gui/fd3bin_gui.py
